@@ -18,12 +18,37 @@ use crate::syntax_mapping::{MappingTarget, SyntaxMapping};
 
 #[derive(Debug)]
 pub struct HighlightingAssets {
-    pub(crate) syntax_set: SyntaxSet,
+    syntax_set: SyntaxSet,
     pub(crate) theme_set: ThemeSet,
     fallback_theme: Option<&'static str>,
 }
 
+const IGNORED_SUFFIXES: [&str; 10] = [
+    // Editor etc backups
+    "~",
+    ".bak",
+    ".old",
+    ".orig",
+    // Debian and derivatives apt/dpkg backups
+    ".dpkg-dist",
+    ".dpkg-old",
+    // Red Hat and derivatives rpm backups
+    ".rpmnew",
+    ".rpmorig",
+    ".rpmsave",
+    // Build system input/template files
+    ".in",
+];
+
 impl HighlightingAssets {
+    fn new(syntax_set: SyntaxSet, theme_set: ThemeSet) -> Self {
+        HighlightingAssets {
+            syntax_set,
+            theme_set,
+            fallback_theme: None,
+        }
+    }
+
     pub fn default_theme() -> &'static str {
         "Monokai Extended"
     }
@@ -72,40 +97,17 @@ impl HighlightingAssets {
             );
         }
 
-        Ok(HighlightingAssets {
-            syntax_set: syntax_set_builder.build(),
+        Ok(HighlightingAssets::new(
+            syntax_set_builder.build(),
             theme_set,
-            fallback_theme: None,
-        })
+        ))
     }
 
     pub fn from_cache(cache_path: &Path) -> Result<Self> {
-        let syntax_set_path = cache_path.join("syntaxes.bin");
-        let theme_set_path = cache_path.join("themes.bin");
-
-        let syntax_set_file = File::open(&syntax_set_path).chain_err(|| {
-            format!(
-                "Could not load cached syntax set '{}'",
-                syntax_set_path.to_string_lossy()
-            )
-        })?;
-        let syntax_set: SyntaxSet = from_reader(BufReader::new(syntax_set_file))
-            .chain_err(|| "Could not parse cached syntax set")?;
-
-        let theme_set_file = File::open(&theme_set_path).chain_err(|| {
-            format!(
-                "Could not load cached theme set '{}'",
-                theme_set_path.to_string_lossy()
-            )
-        })?;
-        let theme_set: ThemeSet = from_reader(BufReader::new(theme_set_file))
-            .chain_err(|| "Could not parse cached theme set")?;
-
-        Ok(HighlightingAssets {
-            syntax_set,
-            theme_set,
-            fallback_theme: None,
-        })
+        Ok(HighlightingAssets::new(
+            asset_from_cache(&cache_path.join("syntaxes.bin"), "syntax set")?,
+            asset_from_cache(&cache_path.join("themes.bin"), "theme set")?,
+        ))
     }
 
     fn get_integrated_syntaxset() -> SyntaxSet {
@@ -117,44 +119,20 @@ impl HighlightingAssets {
     }
 
     pub fn from_binary() -> Self {
-        let syntax_set = Self::get_integrated_syntaxset();
-        let theme_set = Self::get_integrated_themeset();
-
-        HighlightingAssets {
-            syntax_set,
-            theme_set,
-            fallback_theme: None,
-        }
+        HighlightingAssets::new(
+            Self::get_integrated_syntaxset(),
+            Self::get_integrated_themeset(),
+        )
     }
 
     pub fn save_to_cache(&self, target_dir: &Path, current_version: &str) -> Result<()> {
         let _ = fs::create_dir_all(target_dir);
-        let theme_set_path = target_dir.join("themes.bin");
-        let syntax_set_path = target_dir.join("syntaxes.bin");
-
-        print!(
-            "Writing theme set to {} ... ",
-            theme_set_path.to_string_lossy()
-        );
-        dump_to_file(&self.theme_set, &theme_set_path).chain_err(|| {
-            format!(
-                "Could not save theme set to {}",
-                theme_set_path.to_string_lossy()
-            )
-        })?;
-        println!("okay");
-
-        print!(
-            "Writing syntax set to {} ... ",
-            syntax_set_path.to_string_lossy()
-        );
-        dump_to_file(&self.syntax_set, &syntax_set_path).chain_err(|| {
-            format!(
-                "Could not save syntax set to {}",
-                syntax_set_path.to_string_lossy()
-            )
-        })?;
-        println!("okay");
+        asset_to_cache(&self.theme_set, &target_dir.join("themes.bin"), "theme set")?;
+        asset_to_cache(
+            self.get_syntax_set(),
+            &target_dir.join("syntaxes.bin"),
+            "syntax set",
+        )?;
 
         print!(
             "Writing metadata to folder {} ... ",
@@ -170,8 +148,12 @@ impl HighlightingAssets {
         self.fallback_theme = Some(theme);
     }
 
+    pub(crate) fn get_syntax_set(&self) -> &SyntaxSet {
+        &self.syntax_set
+    }
+
     pub fn syntaxes(&self) -> &[SyntaxReference] {
-        self.syntax_set.syntaxes()
+        self.get_syntax_set().syntaxes()
     }
 
     pub fn themes(&self) -> impl Iterator<Item = &str> {
@@ -187,7 +169,7 @@ impl HighlightingAssets {
         match mapping.get_syntax_for(file_name) {
             Some(MappingTarget::MapToUnknown) => None,
             Some(MappingTarget::MapTo(syntax_name)) => {
-                self.syntax_set.find_syntax_by_name(syntax_name)
+                self.get_syntax_set().find_syntax_by_name(syntax_name)
             }
             None => self.get_extension_syntax(file_name.as_os_str()),
         }
@@ -216,7 +198,7 @@ impl HighlightingAssets {
         mapping: &SyntaxMapping,
     ) -> Result<&SyntaxReference> {
         if let Some(language) = language {
-            self.syntax_set
+            self.get_syntax_set()
                 .find_syntax_by_token(language)
                 .ok_or_else(|| ErrorKind::UnknownSyntax(language.to_owned()).into())
         } else {
@@ -249,7 +231,7 @@ impl HighlightingAssets {
                     }),
 
                     Some(MappingTarget::MapTo(syntax_name)) => self
-                        .syntax_set
+                        .get_syntax_set()
                         .find_syntax_by_name(syntax_name)
                         .ok_or_else(|| ErrorKind::UnknownSyntax(syntax_name.to_owned()).into()),
 
@@ -270,23 +252,61 @@ impl HighlightingAssets {
     }
 
     fn get_extension_syntax(&self, file_name: &OsStr) -> Option<&SyntaxReference> {
-        self.syntax_set
+        self.get_syntax_set()
             .find_syntax_by_extension(file_name.to_str().unwrap_or_default())
             .or_else(|| {
-                self.syntax_set.find_syntax_by_extension(
-                    Path::new(file_name)
-                        .extension()
-                        .and_then(|x| x.to_str())
-                        .unwrap_or_default(),
-                )
+                let file_path = Path::new(file_name);
+                self.get_syntax_set()
+                    .find_syntax_by_extension(
+                        file_path
+                            .extension()
+                            .and_then(|x| x.to_str())
+                            .unwrap_or_default(),
+                    )
+                    .or_else(|| {
+                        if let Some(file_str) = file_path.to_str() {
+                            for suffix in IGNORED_SUFFIXES.iter() {
+                                if let Some(stripped_filename) = file_str.strip_suffix(suffix) {
+                                    return self
+                                        .get_extension_syntax(OsStr::new(stripped_filename));
+                                }
+                            }
+                        }
+                        None
+                    })
             })
     }
 
     fn get_first_line_syntax(&self, reader: &mut InputReader) -> Option<&SyntaxReference> {
         String::from_utf8(reader.first_line.clone())
             .ok()
-            .and_then(|l| self.syntax_set.find_syntax_by_first_line(&l))
+            .and_then(|l| self.get_syntax_set().find_syntax_by_first_line(&l))
     }
+}
+
+fn asset_to_cache<T: serde::Serialize>(asset: &T, path: &Path, description: &str) -> Result<()> {
+    print!("Writing {} to {} ... ", description, path.to_string_lossy());
+    dump_to_file(asset, &path).chain_err(|| {
+        format!(
+            "Could not save {} to {}",
+            description,
+            path.to_string_lossy()
+        )
+    })?;
+    println!("okay");
+    Ok(())
+}
+
+fn asset_from_cache<T: serde::de::DeserializeOwned>(path: &Path, description: &str) -> Result<T> {
+    let asset_file = File::open(&path).chain_err(|| {
+        format!(
+            "Could not load cached {} '{}'",
+            description,
+            path.to_string_lossy()
+        )
+    })?;
+    from_reader(BufReader::new(asset_file))
+        .chain_err(|| format!("Could not parse cached {}", description))
 }
 
 #[cfg(test)]
@@ -333,7 +353,7 @@ mod tests {
 
             self.assets
                 .get_syntax(None, &mut opened_input, &self.syntax_mapping)
-                .unwrap_or_else(|_| self.assets.syntax_set.find_syntax_plain_text())
+                .unwrap_or_else(|_| self.assets.get_syntax_set().find_syntax_plain_text())
                 .name
                 .clone()
         }
@@ -347,7 +367,7 @@ mod tests {
 
             self.assets
                 .get_syntax(None, &mut opened_input, &self.syntax_mapping)
-                .unwrap_or_else(|_| self.assets.syntax_set.find_syntax_plain_text())
+                .unwrap_or_else(|_| self.assets.get_syntax_set().find_syntax_plain_text())
                 .name
                 .clone()
         }
@@ -371,7 +391,7 @@ mod tests {
 
             self.assets
                 .get_syntax(None, &mut opened_input, &self.syntax_mapping)
-                .unwrap_or_else(|_| self.assets.syntax_set.find_syntax_plain_text())
+                .unwrap_or_else(|_| self.assets.get_syntax_set().find_syntax_plain_text())
                 .name
                 .clone()
         }
@@ -529,7 +549,7 @@ mod tests {
         assert_eq!(
             test.assets
                 .get_syntax(None, &mut opened_input, &test.syntax_mapping)
-                .unwrap_or_else(|_| test.assets.syntax_set.find_syntax_plain_text())
+                .unwrap_or_else(|_| test.assets.get_syntax_set().find_syntax_plain_text())
                 .name,
             "SSH Config"
         );

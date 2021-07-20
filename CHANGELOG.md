@@ -8,13 +8,8 @@
 
 ## Other
 
-- Fix Clippy lints, see #1661 (@mohamed-abdelnour)
-
 
 ## Syntaxes
-
-- Added support for `dash` syntax, see #1654 (@mohamed-abdelnour)
-- Added support for `XAML` syntax, see #1590 and #1655 (@mohamed-abdelnour)
 
 
 ## New themes
@@ -23,6 +18,30 @@
 ## `bat` as a library
 
 
+
+
+# v0.18.2
+
+## Features
+
+- Ignore known backup/template filename suffixes when selecting the syntax, see #1687 (@scop)
+
+## Bugfixes
+
+- Fix for a security vulnerability on Windows. Prior to this release, `bat` would execute programs called `less`/`less.exe` from the current working directory (instead of the one from `PATH`) with priority. An attacker might be able to use this by placing a malicious program in a shared directory where the user would execute `bat`. `bat` users on Windows are advised to upgrade to this version. See #1724 and #1472 (@Ry0taK).
+
+## Other
+
+- Add bash completion, see #1678 (@scop)
+- Fix Clippy lints, see #1661 (@mohamed-abdelnour)
+- Add syntax highlighting test files, see #1213 and #1668 (@mohamed-abdelnour)
+
+## Syntaxes
+
+- Upgraded Julia syntax to fix a highlighting bug, see #1692
+- Added support for `dash` syntax, see #1654 (@mohamed-abdelnour)
+- Added support for `XAML` syntax, see #1590 and #1655 (@mohamed-abdelnour)
+- Apply `DotENV` syntax also for `.env.default` and `.env.defaults` files, see #1669
 
 
 # v0.18.1
@@ -540,7 +559,7 @@ You can see the API documentation here: https://docs.rs/bat/
 
 - Added `BAT_CONFIG_PATH` environment variable to set a non-default path for `bat`s configuration file, see #375 (@deg4uss3r)
 
-- Allow for multiple occurences of `--style` to allow for the configuration
+- Allow for multiple occurrences of `--style` to allow for the configuration
   of styles from the config file, see #367 (@sindreij)
 
 - Allow for multiple `--line-range` arguments, see #23
